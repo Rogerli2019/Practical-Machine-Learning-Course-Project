@@ -1,0 +1,125 @@
+---
+title: "PML Course Project"
+author: "Rogerli"
+date: "7/6/2020"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+## 1.Overview
+This report is used to predict the manner in which the 6 participants did the exercise. This dataset comes from the paper **Qualitative Activity Recognition of Weight Lifting Exercises**. Many thanks to the authors for their generosity in contributing this data source. 
+
+## 2.Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## 3.Data Process
+### 3.1 Load the Package
+First, we will load the machine learning associated packages.
+```{r package}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
+```
+
+### 3.2 Data Cleaning
+The data cleaning process will focus on the trainning dataset since the final model will use the model derived from trainning set to predict testset.Here, we need to cleanning near-zero-variation variables and ID associated variables which contains no useful information.Besides, we also remove the missing variables. 
+```{r data cleaning,cache=TRUE}
+Train_url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+Test_url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+train<-read.csv(url(Train_url))
+test<-read.csv(url(Test_url))
+
+inTrain  <- createDataPartition(train$classe, p=0.7, list=FALSE)
+trainset <- train[inTrain, ]
+testset <- train[-inTrain, ]
+
+## Remove near-zero-variation data
+nzv<-nearZeroVar(trainset)
+trainset<-trainset[,-nzv]
+testset<-testset[,-nzv]
+
+## Remove ID associated variables, which is first five columns
+trainset<-trainset[,-(1:5)]
+testset<-testset[,-(1:5)]
+
+## Remove variables with missing values
+trainset<-trainset[,colSums(is.na(trainset))==0]
+testset<-testset[,colSums(is.na(testset))==0]
+
+## summarize data diomensions
+dim(trainset)
+dim(testset)
+```
+
+## 4. Correlation Analysis
+```{r corr 1,cache=TRUE}
+cormax <- cor(trainset[, -54])
+corrplot(cormax, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+As the correlation matrix has shown, there are some variables are highly correlated. The next step, we will separate out the variables with more than 80% correlation. 
+```{r corr 2,cache=TRUE}
+highcorrelation <- findCorrelation(cormax, cutoff=0.8)
+names(trainset)[highcorrelation]
+```
+
+## 5. Model Selection
+### 5.1 Classfication trees model
+First, we will fit a tree model to the trainning set.
+```{r classfication tree,cache=TRUE}
+set.seed(1111)
+treemod <- rpart(classe ~ ., data=trainset, method="class")
+fancyRpartPlot(treemod)
+```
+Then, we will use the testset to validate the "decision tree model".
+```{r classfication tree validation,cache=TRUE}
+pred_treemod<-predict(treemod,testset,type="class")
+result_tree<-confusionMatrix(pred_treemod,testset$classe)
+result_tree
+```
+Then result of validation shows that the accuracy of the tree model is 0.8024 on the testset. The detail result of accuracy was shown below.
+```{r classfication tree resuklt,cache=TRUE}
+plot(result_tree$table, col = result_tree$byClass, 
+     main = "Decision Tree Model Validation result")
+```
+
+### 5.2 Random Forest model
+```{r random forest,cache=TRUE}
+cont_rf <- trainControl(method="cv", number=3, verboseIter=FALSE)
+mod_rf <- train(classe ~ ., data=trainset, method="rf", trControl=cont_rf)
+mod_rf$finalModel
+```
+After we get the random forest, we use it to predict the validation (testset). The result of the validation shows the accuracy is 0.9969, which is pretty high
+```{r random forest validation,cache=TRUE}
+pred_rf <- predict(mod_rf,newdata=testset)
+result_rf <- confusionMatrix(pred_rf,testset$classe)
+result_rf
+```
+
+### 5.3 Generalized Boosted Regression Model
+```{r GBM,cache=TRUE}
+set.seed(1111)
+cont_gbm <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+mod_gbm  <- train(classe ~ ., data=trainset, method = "gbm",
+                    trControl = cont_gbm, verbose = FALSE)
+mod_gbm$finalModel
+print(mod_gbm)
+```
+Next, we will use the Generalized Boosted Regression Model to validate the testset data. It shows a very high accuracy, which is 0.9854.
+```{r GBM validation,cache=TRUE}
+pred_gbm <- predict(mod_gbm,newdata=testset)
+result_gbm <- confusionMatrix(pred_gbm,testset$classe)
+result_gbm
+```
+
+## 6.Select best model to predtict the test 
+According to the previous model, the random forest model generate the highest accuracy and we will apply it to the test dataset.
+```{r test,cache=TRUE}
+pred_test<-predict(mod_rf,newdata=test)
+pred_test
+```
